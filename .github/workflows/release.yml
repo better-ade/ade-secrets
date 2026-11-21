@@ -1,0 +1,9 @@
+name: release
+on:
+  push: { branches: [main], paths: [VERSION] }
+  workflow_dispatch:
+permissions: { contents: write }
+jobs:
+  release:
+    uses: better-ade/.github/.github/workflows/release.yml@v1
+    with: { command: "bash tests/run.sh" }
