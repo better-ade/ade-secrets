@@ -67,11 +67,13 @@ case "$v" in good-*) exit 0 ;; *) echo "provider says no to $v"; exit 1 ;; esac
 EOF
 chmod +x "$T/bin/provider-test"
 t_tty "expect q quit" "send t" "expect live test for alpha" "send provider-test\n" "expect live test saved" \
-  "send r" "expect value from" "send p" "expect value for alpha" "sleep 0.2" "send $BAD\n" "expect failed" "send q" -- @ vault
+  "send r" "expect value from" "send p" "expect value for alpha" "sleep 0.2" "send $BAD\n" "expect run the live test" "send y" \
+  "expect failed" "send q" -- @ vault
 check "AC3: a new value that fails the live test is not stored" [ "$(kc alpha)" = "$V1" ]
 check "AC3: ... the vault says the old value is kept" eval 'has "$OUT" "old value is kept"'
 check "AC3: the live test got the value on stdin" grep -q "^CALL provider-test argv= stdin-bytes=${#BAD}" "$T/state/calls.log"
-t_tty "expect q quit" "send r" "expect value from" "send p" "expect value for alpha" "sleep 0.2" "send $GOOD\n" "expect rotated alpha" "send q" -- @ vault
+t_tty "expect q quit" "send r" "expect value from" "send p" "expect value for alpha" "sleep 0.2" "send $GOOD\n" \
+  "expect run the live test" "send y" "expect rotated alpha" "send q" -- @ vault
 check "AC3: a new value that passes replaces the old one" [ "$(kc alpha)" = "$GOOD" ]
 old="$(kc gamma)"
 t_tty "expect q quit" "send j" "send r" "expect value from" "send g" "expect no live test" "send n" "expect old value is kept" "send q" -- @ vault
@@ -105,16 +107,19 @@ t_tty "expect q quit" "send v" "expect for 10 s" "sleep 0.2" "snap $T/run/before
 check "AC1: nothing shown before the confirmation" eval 'hasnt "$(cat "$T/run/before")" "$GOOD"'
 check "AC1: confirmed, the value is shown" eval 'has "$(screen_of "$T/run/shown")" "$GOOD"'
 check "AC1: ... and gone from the screen after 10 s" eval 'hasnt "$(screen_of "$T/run/after")" "$GOOD" && has "$(screen_of "$T/run/after")" "q quit"'
+# the raw stream, in order: the alternate screen is on before the value is drawn, and the scrollback is cleared after
+check "AC1: the alternate screen (?1049h) comes before the value, a scrollback clear (3J) after it" python3 -c '
+import sys; d = open(sys.argv[1], "rb").read(); v = sys.argv[2].encode(); i = d.find(v)
+sys.exit(0 if i > 0 and 0 <= d.find(b"\x1b[?1049h") < i and d.find(b"\x1b[3J", i + len(v)) > i else 1)' "$T/run/out.$T_N" "$GOOD"
 EXTRA_ENV=()
 t_cleanup
 
 # ---- lock and unlock (age store)
 t_setup; STORE_KIND=age CLIP_KIND=xclip
-t_unlock 'fixture-pass-phrase'
+t_unlock
 t_set alpha "$V1"
-t_tty "expect q quit" "send l" "expect session is closed" "send \r" "expect run ade-secrets unlock" \
-  "send u" "expect Enter passphrase" "sleep 0.1" "send fixture-pass-phrase\n" "expect unlocked; locks after" \
-  "send \r" "expect copied alpha" "send q" -- @ vault
+t_tty "expect q quit" "send u" "expect Enter passphrase" "sleep 0.1" "send $AGE_PW\n" "expect unlocked in this vault" \
+  "send \r" "expect copied alpha" "send l" "expect locked: " "send q" -- @ vault
 check "lock and unlock in the vault" eval '[ "$RC" = 0 ] && [ "$(clip)" = "$V1" ]'
 check "the age vault leaks nothing" no_leak "$V1"
 t_done

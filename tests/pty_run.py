@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
 """pty_run.py: run a command detached from the caller's process tree, like a user's own terminal would.
 
-  pty_run.py [--no-pty] [--steps FILE] [--stdin FILE] [--out FILE] [--err FILE] [--timeout S] [--cols N] [--rows N] -- CMD...
+  pty_run.py [--no-pty] [--own-pgrp] [--steps FILE] [--stdin FILE] [--out FILE] [--err FILE] [--timeout S] [--cols N] [--rows N] -- CMD...
 
 The command's parent is a small reaper that has been re-parented to init, so whatever runs the tests (a CI runner,
 or a Claude Code session) is never among the command's ancestors. With a pty (the default) the command gets a new
 session whose controlling terminal is the pty; --out receives everything it ever wrote to the screen (the raw stream).
 Steps, one per line: `expect REGEX` (wait for it in the output since the last match), `send TEXT` (backslash escapes
-such as \\n, \\r, \\x1b), `sleep SECONDS`, `snap FILE` (write the output so far to FILE). Without a pty (--no-pty)
+such as \\n, \\r, \\x1b), `sleep SECONDS`, `snap FILE` (write the output so far to FILE), `run SHELL-COMMAND`
+(run it and wait, e.g. to look at the disk mid-session). --own-pgrp puts the command in its own foreground process
+group, which is not orphaned, so ^Z (SIGTSTP) really stops it as in a user's shell (by default the group is orphaned
+and the system discards terminal stop signals). Without a pty (--no-pty)
 there is no controlling terminal at all; stdin is --stdin (default /dev/null) and stdout/stderr go to --out/--err.
 Exit status: the command's, 124 on a timeout.
 """
-import fcntl, os, re, select, signal, struct, sys, termios, time
+import fcntl, os, re, select, signal, struct, subprocess, sys, termios, time
 
 
 def parse(argv):
-    o = {"pty": True, "steps": None, "stdin": "/dev/null", "out": None, "err": None, "timeout": 30.0, "cols": 100, "rows": 30}
+    o = {"pty": True, "own_pgrp": False, "steps": None, "stdin": "/dev/null", "out": None, "err": None, "timeout": 30.0, "cols": 100, "rows": 30}
     i = 0
     while i < len(argv) and argv[i] != "--":
         a = argv[i]
         if a == "--no-pty":
             o["pty"] = False; i += 1; continue
+        if a == "--own-pgrp":
+            o["own_pgrp"] = True; i += 1; continue
         key = a[2:]
         if key not in o:
             sys.exit("pty_run: unknown option " + a)
@@ -70,6 +75,11 @@ def main():
             if slave is not None:
                 for fd in (0, 1, 2):
                     os.dup2(slave, fd)
+                if o["own_pgrp"]:
+                    os.setpgid(0, 0)
+                    old = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+                    os.tcsetpgrp(0, os.getpid())
+                    signal.signal(signal.SIGTTOU, old)
             else:
                 os.dup2(os.open(o["stdin"], os.O_RDONLY), 0)
                 os.dup2(os.open(o["out"] or "/dev/null", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 1)
@@ -115,6 +125,8 @@ def main():
                 os.write(master, arg); steps.pop(0)
             elif verb == "snap":
                 open(arg, "wb").write(buf); steps.pop(0)
+            elif verb == "run":
+                subprocess.call(["/bin/sh", "-c", arg], stdin=subprocess.DEVNULL); steps.pop(0)
             elif verb == "sleep":
                 if step_until is None: step_until = now + float(arg)
                 if now < step_until: break

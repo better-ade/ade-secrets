@@ -2,13 +2,18 @@
 # Sourced by bin/ade-secrets after its local-only guard and store choice. Every value goes through S1's paths
 # (read_hidden, clip_get, put_value, get_value, clip_put): stdin and pipes only. The screen shows names, kinds,
 # used-by, rotation age, notes and messages, never a value, except the opt-in timed reveal (ADE_SECRETS_REVEAL=on,
-# confirmed each time, cleared after 10 s).
+# confirmed each time, cleared after 10 s). For the age store the vault keeps the identity in its own memory once
+# unlocked (u), hands it to age on a pipe, and forgets it on l or after IDLE seconds without a key (at most 300).
 
 ROTATE_DAYS="${ADE_SECRETS_ROTATE_DAYS:-90}"
 case "$ROTATE_DAYS" in ''|*[!0-9]*) ROTATE_DAYS=90 ;; esac
 { [ "$ROTATE_DAYS" -ge 1 ] && [ "$ROTATE_DAYS" -le 3650 ]; } || ROTATE_DAYS=90
 REVEAL="${ADE_SECRETS_REVEAL:-off}"
 REVEAL_SECONDS=10
+IDLE="${ADE_SECRETS_IDLE:-300}"
+case "$IDLE" in ''|*[!0-9]*) IDLE=300 ;; esac
+[ "$IDLE" -ge 1 ] || IDLE=300
+[ "$IDLE" -le 300 ] || IDLE=300
 NOTES_DIR="$HOME_DIR/notes/$STORE"     # notes are plain text: never a secret
 LIVE_DIR="$HOME_DIR/tests/$STORE"      # the live test per entry: a command that gets the value on stdin
 LIVE_TIMEOUT=30
@@ -38,6 +43,9 @@ EOF
   [ "$SEL" -lt "${#N_[@]}" ] || SEL=$((${#N_[@]} - 1))
   [ "$SEL" -ge 0 ] || SEL=0
 }
+# v_clean: text from a file or the keyboard, without control characters, before it is drawn or stored
+v_clean() { LC_ALL=C tr -d '\000-\037\177'; }
+v_clean_lines() { LC_ALL=C tr -d '\000-\011\013-\037\177'; }
 v_cur() { [ "${#N_[@]}" -gt 0 ] && printf '%s' "${N_[$SEL]}"; }
 v_age() {
   local d=$(($(date +%s) - $1))
@@ -49,10 +57,12 @@ v_age() {
 v_draw() {
   local i mark flag n cur lock="" limit now
   now="$(date +%s)"; limit=$((ROTATE_DAYS * 86400))
-  if [ "$STORE" = age ]; then if session_open; then lock=" - unlocked"; else lock=" - locked"; fi; fi
+  if [ "$STORE" = age ]; then if [ -n "$AGE_ID" ]; then lock=" - unlocked (this vault only)"; else lock=" - locked"; fi; fi
   {
     printf '\033[H\033[2J'
     printf 'ade-secrets vault - %s store - %s entries%s\n' "$STORE" "${#N_[@]}" "$lock"
+    printf '%s\n' "$STORE_LINE"
+    [ -n "$LEFT" ] && printf '%s\n' "$LEFT"
     if [ -n "$OVERDUE" ]; then
       set -f; set -- $OVERDUE; set +f
       printf 'rotate: %s past %s days: %s\n' "$# $( [ $# = 1 ] && echo key || echo keys)" "$ROTATE_DAYS" "$OVERDUE"
@@ -69,7 +79,7 @@ v_draw() {
     [ ${#N_[@]} -gt 0 ] || printf '  (no entries%s; a adds one)\n' "$( [ -n "$FILTER" ] && echo ' match')"
     cur="$(v_cur)"
     if [ -n "$cur" ]; then
-      printf '\nnote: %s\n' "$(cat "$NOTES_DIR/$cur" 2>/dev/null || echo -)"
+      printf '\nnote: %s\n' "$( { head -1 "$NOTES_DIR/$cur" 2>/dev/null || echo -; } | v_clean)"
       printf 'live test: %s\n' "$( [ -s "$LIVE_DIR/$cur" ] && echo set || echo 'none (t sets one)')"
     fi
     printf '\nenter copy  a add  r rotate  t test  n note  d delete  v reveal  / search  l lock  u unlock  q quit\n'
@@ -93,12 +103,15 @@ v_value() {
   FROM="$KEY"
   case "$KEY" in
     p) read_hidden "value for $1 (hidden): " || die 1 "no value read" ;;
-    c) clip_need; VAL="$(clip_get)" ;;
+    c) clip_need
+      # the user put a key on the clipboard for this: it is cleared however this action ends
+      trap 'VAL=""; clip_clear' EXIT; trap 'exit 130' INT TERM HUP
+      VAL="$(clip_get)" ;;
     g) VAL="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" ;;
     *) die 1 "cancelled" ;;
   esac
   [ -n "$VAL" ] || die 1 "empty; nothing stored"
-  case "$VAL" in *$'\n'*|*$'\r'*) die 1 "a value is one line; nothing stored" ;; esac
+  case "$VAL" in *$'\n'*|*$'\r'*) die 1 "a value is one line; nothing stored$( [ "$FROM" = c ] && echo '; the clipboard is cleared')" ;; esac
 }
 # live_test <command>: the value on stdin; its output never reaches the screen; at most LIVE_TIMEOUT seconds
 live_test() {
@@ -115,35 +128,39 @@ live_test() {
 # ---------------------------------------------------------------- actions (each runs in v_act's subshell)
 va_add() {
   local name kind used now
+  local other
   read_line "name: " || die 1 "cancelled"; name="$REPLY"; valid_name "$name"
   meta_line "$name" "$STORE" >/dev/null && die 1 "$name exists; r rotates it"
+  other="$(same_but_case "$name")" && die 1 "$name differs from the entry $other only in case; refused"
   read_line "kind [secret]: " || die 1 "cancelled"; kind="${REPLY:-secret}"; valid_label "$kind"
   read_line "used by [-]: " || die 1 "cancelled"; used="${REPLY:--}"; valid_label "$used"
   need_open
   v_value "$name"
-  put_value "$name" || die 1 "could not store $name in the $STORE store"
+  put_value "$name" no yes || die 1 "could not store $name in the $STORE store"
   VAL=""
-  [ "$FROM" = c ] && clip_clear
   now="$(date +%s)"; meta_put "$name" "$STORE" "$kind" "$used" "$now" "$now" no; record_store
   say "stored $name in the $STORE store$( [ "$FROM" = c ] && echo '; the clipboard is cleared')"
 }
 
 va_rotate() {
-  local name="${1:-}" line tested=""; need_cur "$name"; known "$name"; need_open
+  local name="${1:-}" line tested="" live helper; need_cur "$name"; known "$name"; need_open
+  line="$(meta_line "$name" "$STORE")"; helper="$(meta_field "$line" 7)"; [ "$helper" = yes ] || helper=no
   printf 'rotate %s: ' "$name" >/dev/tty
   v_value "$name"
   if [ -s "$LIVE_DIR/$name" ]; then
+    # the command is a file anyone running as this user could change: show it and run only what the user saw
+    live="$(head -1 "$LIVE_DIR/$name" | v_clean)"
+    v_key "run the live test for $name: $live ? (y/N) "
+    [ "$KEY" = y ] || die 1 "the live test was not run; not rotated, the old value is kept"
     printf 'testing the new value with the live test for %s ...\n' "$name" >/dev/tty
-    printf '%s' "$VAL" | live_test "$(cat "$LIVE_DIR/$name")" || die 1 "the new value failed the live test for $name; the old value is kept"
+    printf '%s' "$VAL" | live_test "$live" || die 1 "the new value failed the live test for $name; the old value is kept"
     tested=1
   else
     v_key "$name has no live test (t sets one); store the new value untested? (y/N) "
     [ "$KEY" = y ] || die 1 "not rotated; the old value is kept"
   fi
-  put_value "$name" || die 1 "could not store the new value for $name"
+  put_value "$name" "$helper" no || die 1 "could not store the new value for $name"
   VAL=""
-  [ "$FROM" = c ] && clip_clear
-  line="$(meta_line "$name" "$STORE")"
   meta_put "$name" "$STORE" "$(meta_field "$line" 3)" "$(meta_field "$line" 4)" "$(meta_field "$line" 5)" "$(date +%s)" "$(meta_field "$line" 7)"
   say "rotated $name: $( [ -n "$tested" ] && echo 'the new value passed its live test' || echo 'the new value is stored, untested')"
 }
@@ -151,7 +168,7 @@ va_rotate() {
 va_test() {
   local name="${1:-}"; need_cur "$name"; known "$name"
   read_line "live test for $name (a command; it gets the value on stdin, exit 0 = it works; never put a key in it; empty removes it): " || die 1 "cancelled"
-  mkdir -p "$LIVE_DIR"
+  REPLY="$(printf '%s' "$REPLY" | v_clean)"
   if [ -z "$REPLY" ]; then rm -f "$LIVE_DIR/$name"; say "live test removed for $name"
   else printf '%s\n' "$REPLY" > "$LIVE_DIR/$name"; say "live test saved for $name"; fi
 }
@@ -159,8 +176,7 @@ va_test() {
 va_note() {
   local name="${1:-}"; need_cur "$name"; known "$name"
   read_line "note for $name (not encrypted; never a secret; empty removes it): " || die 1 "cancelled"
-  case "$REPLY" in *"$(printf '\t')"*) die 1 "a note is one line of text" ;; esac
-  mkdir -p "$NOTES_DIR"
+  REPLY="$(printf '%s' "$REPLY" | v_clean)"
   if [ -z "$REPLY" ]; then rm -f "$NOTES_DIR/$name"; say "note removed for $name"
   else printf '%s\n' "$REPLY" > "$NOTES_DIR/$name"; say "note saved for $name"; fi
 }
@@ -189,23 +205,58 @@ v_search() {
 }
 
 # ---------------------------------------------------------------- the loop
+# the age identity lives in this process only: unlocked by u, forgotten by l, after IDLE s without a key, and on exit
+v_unlock() {
+  [ "$STORE" = age ] || { MSG="the $STORE store has no session to unlock"; return 0; }
+  if [ ! -f "$AGE_DIR/identity.age" ]; then v_act cmd_unlock; return 0; fi
+  printf '\n' >/dev/tty
+  AGE_ID="$(age -d "$AGE_DIR/identity.age" 2>/dev/tty)" || AGE_ID=""
+  [ -n "$AGE_ID" ] || { AGE_ID=""; MSG="wrong passphrase; still locked"; return 0; }
+  AGE_R="$(printf '%s\n' "$AGE_ID" | age-keygen -y 2>/dev/null | head -1)"
+  [ -n "$AGE_R" ] || { AGE_ID=""; MSG="the age identity gives no recipient; still locked"; return 0; }
+  MSG="unlocked in this vault only (nothing on disk); locks after $IDLE s idle, or l"
+}
+v_lock() {
+  [ "$STORE" = age ] || { MSG="the $STORE store has no session to lock"; return 0; }
+  AGE_ID="" AGE_R=""; MSG="locked${1:+ after $1}: the identity is gone from memory"
+}
+# v_reveal_guarded: ^Z would stop the vault with the value on screen, so TSTP is ignored for the reveal's duration
+v_reveal_guarded() {
+  local old; old="$(trap -p TSTP)"
+  trap '' TSTP
+  v_act va_reveal "$1"
+  if [ -n "$old" ]; then eval "$old"; else trap - TSTP; fi
+}
 V_STTY=""
 v_restore() {
+  AGE_ID="" AGE_R=""
   [ -n "$V_STTY" ] && stty "$V_STTY" </dev/tty 2>/dev/null
   printf '\033[?1049l' >/dev/tty 2>/dev/null
 }
 cmd_vault() {
   [ $# -eq 0 ] || die 2 "usage: ade-secrets vault"
   local rest cur
+  private_dir "$HOME_DIR/notes" create; private_dir "$NOTES_DIR" create
+  private_dir "$HOME_DIR/tests" create; private_dir "$LIVE_DIR" create
+  STORE_LINE="store: $STORE ($( [ -n "$RECORDED" ] && echo recorded || echo 'from ADE_SECRETS_STORE, recorded on the first add'); to switch: ade-secrets store <name>, in your terminal)"
+  LEFT="$(report_left 2>&1 | sed "s/^$ME: //" | v_clean_lines)"
   V_STTY="$(stty -g </dev/tty)" || die 1 "cannot use this terminal"
   trap v_restore EXIT
   trap 'exit 130' INT TERM HUP
   printf '\033[?1049h' >/dev/tty
   stty -echo </dev/tty
-  MSG="$(report_left 2>&1 | head -1)"; MSG="${MSG#"$ME: "}"
+  MSG=""
   while :; do
     v_load; v_draw
-    KEY=""; IFS= read -rsn1 KEY </dev/tty || break
+    KEY=""
+    if [ -n "$AGE_ID" ]; then
+      if ! IFS= read -rsn1 -t "$IDLE" KEY </dev/tty; then
+        [ -z "$KEY" ] || continue
+        v_lock "$IDLE s idle"; continue
+      fi
+    else
+      IFS= read -rsn1 KEY </dev/tty || break
+    fi
     cur="$(v_cur)"
     case "$KEY" in
       "$ESC") rest=""; IFS= read -rsn2 -t 1 rest </dev/tty
@@ -218,10 +269,10 @@ cmd_vault() {
       t) v_act va_test "$cur" ;;
       n) v_act va_note "$cur" ;;
       d) v_act va_forget "$cur" ;;
-      v) v_act va_reveal "$cur" ;;
+      v) v_reveal_guarded "$cur" ;;
       /) v_search ;;
-      l) v_act cmd_lock ;;
-      u) v_act cmd_unlock ;;
+      l) v_lock ;;
+      u) v_unlock ;;
       q) break ;;
       *) MSG="" ;;
     esac
