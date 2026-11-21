@@ -1,0 +1,8 @@
+#!/bin/bash
+# Fake xsel --clipboard --input|--output|--clear.
+{ printf 'CALL xsel argv=%s\n' "$*"; env | sed 's/^/  env /'; } >> "$FAKE_LOG"
+case " $* " in
+  *" --output "*) [ -f "$FAKE_STATE/clipboard" ] && cat "$FAKE_STATE/clipboard"; exit 0 ;;
+  *" --clear "*) : > "$FAKE_STATE/clipboard" ;;
+  *) cat > "$FAKE_STATE/clipboard" ;;
+esac

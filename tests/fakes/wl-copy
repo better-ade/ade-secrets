@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake wl-copy (stdin) and wl-copy --clear.
+{ printf 'CALL wl-copy argv=%s\n' "$*"; env | sed 's/^/  env /'; } >> "$FAKE_LOG"
+case " $* " in *" --clear "*) : > "$FAKE_STATE/clipboard" ;; *) cat > "$FAKE_STATE/clipboard" ;; esac

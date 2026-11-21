@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+"""Fake age-keygen: a fixed identity (not a real age key)."""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _fake
+_fake.log("age-keygen")
+sys.stderr.write("Public key: age1fakerecipientfortests\n")
+sys.stdout.write("# created: 2026-11-21T00:00:00Z\n# public key: age1fakerecipientfortests\nFAKE-AGE-IDENTITY-FOR-TESTS\n")

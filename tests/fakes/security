@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Fake macOS `security`: generic passwords in $FAKE_STATE/keychain/<service>/<account>; `-i` reads commands on stdin."""
+import os, shlex, sys
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _fake
+
+_fake.log("security")
+
+
+def opts(args):
+    o, i = {}, 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-s", "-a", "-w", "-l", "-D", "-j", "-T"):
+            o[a] = args[i + 1] if i + 1 < len(args) else ""; i += 2
+        elif a.startswith("-"):
+            o[a] = True; i += 1
+        else:
+            o.setdefault("_", []).append(a); i += 1
+    return o
+
+
+def run(args):
+    if not args:
+        return 2
+    cmd, o = args[0], opts(args[1:])
+    f = _fake.path("keychain", o.get("-s", ""), o.get("-a", ""))
+    if cmd == "add-generic-password":
+        if os.path.exists(f) and "-U" not in o:
+            return 45
+        open(f, "w").write(o.get("-w", ""))
+        return 0
+    if cmd == "find-generic-password":
+        if not os.path.exists(f):
+            sys.stderr.write("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n")
+            return 44
+        if "-w" in o:
+            sys.stdout.write(open(f).read() + "\n")
+        else:
+            sys.stdout.write('keychain: "fake"\nclass: "genp"\n')
+        return 0
+    if cmd == "delete-generic-password":
+        if not os.path.exists(f):
+            return 44
+        os.remove(f)
+        return 0
+    return 2
+
+
+if sys.argv[1:2] == ["-i"]:
+    rc = 0
+    for line in sys.stdin.read().splitlines():
+        if line.strip():
+            rc = run(shlex.split(line)) or rc
+    sys.exit(0)  # like the real tool, -i hides a failed command's status
+sys.exit(run(sys.argv[1:]))

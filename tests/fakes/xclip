@@ -1,0 +1,7 @@
+#!/bin/bash
+# Fake xclip -selection clipboard -in|-out.
+{ printf 'CALL xclip argv=%s\n' "$*"; env | sed 's/^/  env /'; } >> "$FAKE_LOG"
+case " $* " in
+  *" -out "*|*" -o "*) [ -f "$FAKE_STATE/clipboard" ] && cat "$FAKE_STATE/clipboard"; exit 0 ;;
+  *) mkdir -p "$FAKE_STATE"; cat > "$FAKE_STATE/clipboard" ;;
+esac
