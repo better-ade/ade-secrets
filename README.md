@@ -8,6 +8,7 @@ export ADE_SECRETS_STORE=keychain        # or pass, or age; chosen once, never s
 ade-secrets set openai --helper          # hidden prompt (or --clipboard); --helper lets Claude Code's key helper read it
 ade-secrets copy openai                  # to the clipboard, cleared after 20 s if unchanged
 ade-secrets list | status | forget <name> | lock | unlock
+ade-secrets vault                        full screen: search, add, copy, rotate (live test), notes, reminders
 ```
 
 In Claude Code's settings: `"apiKeyHelper": "ade-secrets helper openai"`. How a hub delegates, what tells the key

@@ -7,8 +7,9 @@ The command's parent is a small reaper that has been re-parented to init, so wha
 or a Claude Code session) is never among the command's ancestors. With a pty (the default) the command gets a new
 session whose controlling terminal is the pty; --out receives everything it ever wrote to the screen (the raw stream).
 Steps, one per line: `expect REGEX` (wait for it in the output since the last match), `send TEXT` (backslash escapes
-such as \\n, \\r, \\x1b), `sleep SECONDS`. Without a pty (--no-pty) there is no controlling terminal at all; stdin is
---stdin (default /dev/null) and stdout/stderr go to --out/--err. Exit status: the command's, 124 on a timeout.
+such as \\n, \\r, \\x1b), `sleep SECONDS`, `snap FILE` (write the output so far to FILE). Without a pty (--no-pty)
+there is no controlling terminal at all; stdin is --stdin (default /dev/null) and stdout/stderr go to --out/--err.
+Exit status: the command's, 124 on a timeout.
 """
 import fcntl, os, re, select, signal, struct, sys, termios, time
 
@@ -112,6 +113,8 @@ def main():
                 pos = m.end(); steps.pop(0)
             elif verb == "send":
                 os.write(master, arg); steps.pop(0)
+            elif verb == "snap":
+                open(arg, "wb").write(buf); steps.pop(0)
             elif verb == "sleep":
                 if step_until is None: step_until = now + float(arg)
                 if now < step_until: break

@@ -83,6 +83,13 @@ t_unlock() {
   if [ -f "$STORE/age/identity.age" ]; then t_tty "expect Enter passphrase" "sleep 0.1" "send $1\n" -- @ unlock
   else t_tty "expect Enter passphrase" "sleep 0.1" "send $1\n" "expect Confirm" "sleep 0.1" "send $1\n" -- @ unlock; fi
 }
+# screen_of <file>: what a terminal shows at the end of that output: the text after the last clear-screen, escapes removed
+screen_of() {
+  python3 -c 'import re, sys
+d = open(sys.argv[1], "rb").read().split(b"\x1b[2J")[-1]
+d = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]|\r", b"", d)
+sys.stdout.write(d.decode("utf-8", "replace"))' "$1"
+}
 clip() { cat "$T/state/clipboard" 2>/dev/null; }
 clip_put() { printf '%s' "$1" > "$T/state/clipboard"; }
 calls() { cat "$T/state/calls.log"; }

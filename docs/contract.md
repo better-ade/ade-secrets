@@ -45,6 +45,13 @@ The hub's apiKeyHelper line stays as it is (`... /path/to/hub/bin/secret <name>`
 execs `ade-secrets get <name>`, and the value reaches Claude Code on stdout. Moving a key from the hub's own Keychain
 service is a re-entry in the user's terminal (`bin/keys set <tool>`); nothing is copied across automatically.
 
+## The vault
+
+`ade-secrets vault` is the terminal interface (ade-cli's `ade vault` opens it in the user's own terminal). It is guarded
+like every command but `get`: inside an agent context it exits 3 before drawing anything. Settings, all optional:
+`ADE_SECRETS_ROTATE_DAYS` (reminder age, default 90) and `ADE_SECRETS_REVEAL=on` (allows the confirmed 10 s reveal; off
+by default). A live test for rotation is a command that gets the candidate value on stdin and exits 0 when it works.
+
 ## The key helper: what tells it apart
 
 Claude Code's docs (code.claude.com, settings reference, `apiKeyHelper`; checked 2026-11-21) say the helper is "a shell
