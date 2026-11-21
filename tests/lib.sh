@@ -73,15 +73,21 @@ t_notty() {
 
 _t_words() { local w; for w in "$@"; do case "$w" in @) CMD+=("$BIN") ;; @claude) CMD+=("$T/bin/claude") ;; *) CMD+=("$w") ;; esac; done; }
 
-# t_set <name> <value> [set options...]: store a value through the hidden prompt (unlock first for age)
+# the age store asks for its passphrase on every set and copy (it keeps no session)
+AGE_PW='fixture-pass-phrase'
+_t_pw() { if [ "${STORE_KIND:-}" = age ]; then PW_STEPS=("expect Enter passphrase" "sleep 0.1" "send $AGE_PW\n"); else PW_STEPS=(); fi; }
+# t_set <name> <value> [set options...]: store a value through the hidden prompt
 t_set() {
-  local n="$1" v="${2//\\/\\\\}"; shift 2
-  t_tty "expect value for $n" "sleep 0.2" "send $v\n" -- @ set "$n" ${1+"$@"}
+  local n="$1" v="${2//\\/\\\\}"; shift 2; _t_pw
+  t_tty ${PW_STEPS[@]+"${PW_STEPS[@]}"} "expect value for $n" "sleep 0.2" "send $v\n" -- @ set "$n" ${1+"$@"}
 }
-# t_unlock <passphrase>: unlock (or create) the age store
+# t_copy <name> [copy options...]: copy, answering the age passphrase prompt when there is one
+t_copy() { _t_pw; t_tty ${PW_STEPS[@]+"${PW_STEPS[@]}"} -- @ copy "$@"; }
+# t_unlock [passphrase]: create the age store (choose a passphrase), or check the passphrase of an existing one
 t_unlock() {
-  if [ -f "$STORE/age/identity.age" ]; then t_tty "expect Enter passphrase" "sleep 0.1" "send $1\n" -- @ unlock
-  else t_tty "expect Enter passphrase" "sleep 0.1" "send $1\n" "expect Confirm" "sleep 0.1" "send $1\n" -- @ unlock; fi
+  local p="${1:-$AGE_PW}"
+  if [ -f "$STORE/age/identity.age" ]; then t_tty "expect Enter passphrase" "sleep 0.1" "send $p\n" -- @ unlock
+  else t_tty "expect Enter passphrase" "sleep 0.1" "send $p\n" "expect Confirm" "sleep 0.1" "send $p\n" -- @ unlock; fi
 }
 # screen_of <file>: what a terminal shows at the end of that output: the text after the last clear-screen, escapes removed
 screen_of() {

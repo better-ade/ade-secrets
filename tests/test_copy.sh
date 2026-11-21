@@ -33,6 +33,10 @@ t_tty -- @ copy alpha --for 30
 check "macOS: copy puts the value on the pasteboard" [ "$RC" = 0 -a "$(clip)" = "$V1" ]
 check "macOS: the concealed marker is set" [ -f "$T/state/clipboard.concealed" ]
 check "macOS: the value went to osascript on stdin, not in its script" eval '! grep -q -F -- "$V1" "$T/state/calls.log"'
+t_tty -- @ copy alpha --for 1
+check "macOS: copy --for 1 puts it on the pasteboard" [ "$(clip)" = "$V1" ]
+sleep 3
+check "macOS: ... and the timed clear empties the pasteboard and drops the marker" eval '[ -z "$(clip)" ] && [ ! -f "$T/state/clipboard.concealed" ]'
 
 clip_put 'fixture-untouched'; : > "$T/state/calls.log"
 for k in macos xclip; do
@@ -46,6 +50,6 @@ t_tty -- @ copy alpha --for 30
 check "over SSH with no clipboard tool chosen copy refuses" [ "$RC" = 4 ]
 EXTRA_ENV=() CLIP_KIND=xclip
 t_tty -- @ copy alpha
-check "copy defaults to clearing after 20 s (last: its clearer outlives the test)" eval '[ "$RC" = 0 ] && has "$OUT" "20 s"'
+check "copy defaults to clearing after 10 s (last: its clearer outlives the test)" eval '[ "$RC" = 0 ] && has "$OUT" "10 s"'
 check "nothing leaked" no_leak "$V1"
 t_done

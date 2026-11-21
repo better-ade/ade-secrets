@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Fake age-keygen: a fixed identity (not a real age key)."""
+"""Fake age-keygen: a fixed identity (not a real age key); -y prints the recipient of the identity on stdin."""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import _fake
 _fake.log("age-keygen")
+if "-y" in sys.argv[1:]:
+    if b"FAKE-AGE-IDENTITY-FOR-TESTS" not in sys.stdin.buffer.read():
+        sys.exit("age-keygen: error: no identity")
+    sys.stdout.write("age1fakerecipientfortests\n")
+    sys.exit(0)
 sys.stderr.write("Public key: age1fakerecipientfortests\n")
 sys.stdout.write("# created: 2026-11-21T00:00:00Z\n# public key: age1fakerecipientfortests\nFAKE-AGE-IDENTITY-FOR-TESTS\n")

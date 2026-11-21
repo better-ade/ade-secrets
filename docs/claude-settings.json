@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/.ade-secrets/**)",
+      "Bash(security find-generic-password*)",
+      "Bash(security dump-keychain*)",
+      "Bash(pass show*)",
+      "Bash(pbpaste*)"
+    ],
+    "ask": [
+      "Bash(ade-secrets *)"
+    ]
+  }
+}
