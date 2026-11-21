@@ -1,19 +1,37 @@
 #!/usr/bin/env python3
-"""Fake osascript for the macOS clipboard: a script that sets the pasteboard string reads stdin into the fake clipboard
-and records the concealed marker when it asks for org.nspasteboard.ConcealedType; clearContents alone clears it."""
-import os, sys
+"""Fake osascript for the macOS clipboard. It applies the JXA script's statements in order: clearContents empties
+the pasteboard (and drops its markers), setStringForType(s, "public.utf8-plain-text") puts stdin there, and
+setStringForType("", "org.nspasteboard.ConcealedType") sets the concealed marker. Anything else is ignored."""
+import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import _fake
 _fake.log("osascript")
-src = " ".join(sys.argv[1:])
+args = sys.argv[1:]
+src = args[args.index("-e") + 1] if "-e" in args else ""
 clip, marker = _fake.path("clipboard"), _fake.path("clipboard.concealed")
-if "setStringForType" in src:
-    open(clip, "wb").write(sys.stdin.buffer.read())
-    if "org.nspasteboard.ConcealedType" in src:
+content = open(clip, "rb").read() if os.path.exists(clip) else b""
+concealed, changed, stdin = os.path.exists(marker), False, None
+for st in src.split(";"):
+    if "clearContents" in st:
+        content, concealed, changed = b"", False, True
+        continue
+    m = re.search(r'setStringForType\(\s*([A-Za-z_]\w*|"[^"]*")\s*,\s*"([^"]+)"\s*\)', st)
+    if not m:
+        continue
+    arg, typ = m.groups()
+    if arg.startswith('"'):
+        val = arg.strip('"').encode()
+    else:
+        if stdin is None:
+            stdin = sys.stdin.buffer.read()
+        val = stdin
+    if typ == "public.utf8-plain-text":
+        content, changed = val, True
+    elif typ == "org.nspasteboard.ConcealedType":
+        concealed, changed = True, True
+if changed:
+    open(clip, "wb").write(content)
+    if concealed:
         open(marker, "w").write("concealed\n")
     elif os.path.exists(marker):
-        os.remove(marker)
-elif "clearContents" in src:
-    open(clip, "wb").close()
-    if os.path.exists(marker):
         os.remove(marker)

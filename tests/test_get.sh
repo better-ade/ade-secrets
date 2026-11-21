@@ -1,8 +1,9 @@
 #!/bin/bash
-# S1 AC4: `get` prints the value only in the key-helper context and refuses from a Bash-tool-like context.
-# The key-helper context, from Claude Code's docs and checked against Claude Code 2.1.330 (docs/contract.md): spawned
-# by claude through /bin/sh, no terminal, without CLAUDECODE or CLAUDE_CODE_CHILD_SESSION (which the Bash tool, hooks
-# and the status line get), possibly with CLAUDE_CODE_ENTRYPOINT. The entry must be enabled for the helper (--helper).
+# S1 AC4 (reworded after review): `get` prints the value only for an entry the user enabled for the key helper, and
+# only in a key-helper-like context. Claude Code gives the helper no marker (docs/contract.md), so the context checks
+# (no tool/hook markers, no terminal, claude as the nearest non-shell parent) are an accident guard, not a boundary:
+# anything Claude Code runs can strip the markers and read a helper entry. Entries not enabled for the helper are
+# never returned, whatever the context.
 . "$(dirname "$0")/lib.sh"
 V1='fixture-value-helper-1'
 t_setup; STORE_KIND=keychain CLIP_KIND=xclip
@@ -25,9 +26,13 @@ for verb in get helper; do
            CLAUDE_CODE_SESSION_ID=fixture CLAUDE_PROJECT_DIR=/tmp; do
     EXTRA_ENV=($v)
     t_notty -- @claude /bin/bash -c "\"$BIN\" $verb apikey"
-    check "$verb: refuses from a Bash-tool-like context ($v)" [ "$RC" = 3 -a -z "$OUT" ]
+    check "$verb: accident guard: refuses with the Bash tool markers ($v)" [ "$RC" = 3 -a -z "$OUT" ]
   done
   EXTRA_ENV=()
+  t_notty -- @claude /bin/bash -c "\"$BIN\" $verb apikey"
+  check "$verb: documented limit: with the markers stripped, a Bash-tool-like context reads a helper entry" [ "$RC" = 0 -a "$OUT" = "$V1" ]
+  t_notty -- @claude /bin/bash -c "\"$BIN\" $verb other"
+  check "$verb: ... but never an entry not enabled for the helper" [ "$RC" = 3 -a -z "$OUT" ]
   t_notty -- /bin/sh -c "\"$BIN\" $verb apikey"
   check "$verb: refuses without a claude parent" [ "$RC" = 3 -a -z "$OUT" ]
   t_notty -- @claude python3 -c 'import subprocess, sys; sys.exit(subprocess.call(sys.argv[1:]))' "$BIN" $verb apikey
