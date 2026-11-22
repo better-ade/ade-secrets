@@ -18,10 +18,12 @@ NOTES_DIR="$HOME_DIR/notes/$STORE"     # notes are plain text: never a secret
 LIVE_DIR="$HOME_DIR/tests/$STORE"      # the live test per entry: a command that gets the value on stdin
 LIVE_TIMEOUT=30
 ESC=$(printf '\033')
-SEL=0 FILTER="" MSG="" OVERDUE="" KEY="" FROM=""
+SEL=0 FILTER="" MSG="" OVERDUE="" KEY="" FROM="" VSCOPE=""
 N_=() K_=() U_=() R_=()
 
 # ---------------------------------------------------------------- data
+# Rows come from meta through meta_clean (no control, direction-changing or invisible character reaches the screen);
+# a rotation time that is not a number counts as 0 (overdue), never as shell arithmetic. --scope keeps one scope.
 v_load() {
   N_=() K_=() U_=() R_=(); OVERDUE=""
   local n s k u c r h hay f limit now
@@ -30,6 +32,8 @@ v_load() {
   [ -f "$META" ] || return 0
   while IFS="$(printf '\t')" read -r n s k u c r h; do
     [ -n "$n" ] || continue
+    case "$r" in ''|*[!0-9]*) r=0 ;; esac
+    case "$n" in *.*) [ -z "$VSCOPE" ] || [ "${n%%.*}" = "$VSCOPE" ] || continue ;; *) [ -z "$VSCOPE" ] || continue ;; esac
     [ $((now - r)) -ge "$limit" ] && OVERDUE="$OVERDUE $n"
     if [ -n "$f" ]; then
       hay="$(printf '%s %s %s' "$n" "$k" "$u" | tr 'A-Z' 'a-z')"
@@ -37,7 +41,7 @@ v_load() {
     fi
     N_[${#N_[@]}]="$n"; K_[${#K_[@]}]="$k"; U_[${#U_[@]}]="$u"; R_[${#R_[@]}]="$r"
   done <<EOF
-$(awk -F'\t' -v s="$STORE" '$2 == s' "$META" | sort)
+$(meta_clean | awk -F'\t' -v s="$STORE" '$2 == s' | sort)
 EOF
   OVERDUE="${OVERDUE# }"
   [ "$SEL" -lt "${#N_[@]}" ] || SEL=$((${#N_[@]} - 1))
@@ -67,13 +71,16 @@ v_draw() {
       set -f; set -- $OVERDUE; set +f
       printf 'rotate: %s past %s days: %s\n' "$# $( [ $# = 1 ] && echo key || echo keys)" "$ROTATE_DAYS" "$OVERDUE"
     fi
-    [ -n "$FILTER" ] && printf 'search: %s\n' "$FILTER"
-    printf '\n  %-24s %-12s %-16s %-8s\n' NAME KIND USED-BY ROTATED
+    [ -n "$VSCOPE" ] && printf 'scope: %s\n' "$VSCOPE"
+    [ -n "$FILTER" ] && printf 'search: %s\n' "$(printf '%s' "$FILTER" | v_clean)"
+    printf '\n  %-16s %-24s %-12s %-16s %-8s\n' SCOPE NAME KIND USED-BY ROTATED
     i=0
     while [ $i -lt ${#N_[@]} ]; do
       mark="  "; [ $i = "$SEL" ] && mark="> "
       flag=""; [ $((now - R_[i])) -ge "$limit" ] && flag="rotate!"
-      printf '%s%-24s %-12s %-16s %-8s %s\n' "$mark" "${N_[$i]}" "${K_[$i]}" "${U_[$i]}" "$(v_age "${R_[$i]}")" "$flag"
+      n="${N_[$i]}"
+      case "$n" in *.*) printf '%s%-16s %-24s ' "$mark" "${n%%.*}" "${n#*.}" ;; *) printf '%s%-16s %-24s ' "$mark" - "$n" ;; esac
+      printf '%-12s %-16s %-8s %s\n' "${K_[$i]}" "${U_[$i]}" "$(v_age "${R_[$i]}")" "$flag"
       i=$((i + 1))
     done
     [ ${#N_[@]} -gt 0 ] || printf '  (no entries%s; a adds one)\n' "$( [ -n "$FILTER" ] && echo ' match')"
@@ -234,7 +241,7 @@ v_restore() {
   printf '\033[?1049l' >/dev/tty 2>/dev/null
 }
 cmd_vault() {
-  [ $# -eq 0 ] || die 2 "usage: ade-secrets vault"
+  case "$#:${1:-}" in 0:) ;; 2:--scope) valid_scope "$2"; VSCOPE="$2" ;; *) die 2 "usage: ade-secrets vault [--scope S]" ;; esac
   local rest cur
   private_dir "$HOME_DIR/notes" create; private_dir "$NOTES_DIR" create
   private_dir "$HOME_DIR/tests" create; private_dir "$LIVE_DIR" create

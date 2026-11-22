@@ -77,10 +77,17 @@ _t_words() { local w; for w in "$@"; do case "$w" in @) CMD+=("$BIN") ;; @claude
 # the age store asks for its passphrase on every set and copy (it keeps no session)
 AGE_PW='fixture-pass-phrase'
 _t_pw() { if [ "${STORE_KIND:-}" = age ]; then PW_STEPS=("expect Enter passphrase" "sleep 0.1" "send $AGE_PW\n"); else PW_STEPS=(); fi; }
-# t_set <name> <value> [set options...]: store a value through the hidden prompt
+# t_exists <name>: meta lists the entry in the store a run would use (ADE_SECRETS_STORE, else the recorded one)
+t_exists() {
+  local s="${STORE_KIND:-}"; [ -n "$s" ] || s="$(cat "$STORE/store" 2>/dev/null)"
+  [ -f "$STORE/meta" ] && awk -F'\t' -v n="$1" -v s="$s" '$1 == n && $2 == s { f = 1 } END { exit !f }' "$STORE/meta"
+}
+# t_set <name> <value> [set options...]: store a value through the hidden prompt; an existing entry is replaced
+# (contract v2: set asks first, and t_set answers y; tests/test_set_replace.sh tests the question itself)
 t_set() {
   local n="$1" v="${2//\\/\\\\}"; shift 2; _t_pw
-  t_tty ${PW_STEPS[@]+"${PW_STEPS[@]}"} "expect value for $n" "sleep 0.2" "send $v\n" -- @ set "$n" ${1+"$@"}
+  local rs=(); t_exists "$n" && rs=("expect replace " "sleep 0.1" "send y\n")
+  t_tty ${rs[@]+"${rs[@]}"} ${PW_STEPS[@]+"${PW_STEPS[@]}"} "expect value for $n" "sleep 0.2" "send $v\n" -- @ set "$n" ${1+"$@"}
 }
 # t_copy <name> [copy options...]: copy, answering the age passphrase prompt when there is one
 t_copy() { _t_pw; t_tty ${PW_STEPS[@]+"${PW_STEPS[@]}"} -- @ copy "$@"; }

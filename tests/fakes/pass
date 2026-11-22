@@ -1,12 +1,14 @@
 #!/bin/bash
-# Fake `pass`: entries in $FAKE_STATE/pass/<path>; insert reads the value on stdin.
+# Fake `pass`: entries in $FAKE_STATE/pass/<path>; insert reads the value on stdin. Like the real pass it also leaves
+# an encrypted-looking file at ${PASSWORD_STORE_DIR:-~/.password-store}/<path>.gpg (a marker, never the value), so a
+# presence check can look at the file the real tool keeps.
 { printf 'CALL pass argv=%s\n' "$*"; env | sed 's/^/  env /'; } >> "$FAKE_LOG"
-D="$FAKE_STATE/pass"
+D="$FAKE_STATE/pass" G="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
 case "${1:-}" in
   insert) shift; m=0; while [ $# -gt 1 ]; do case "$1" in -m|--multiline) m=1;; -f|--force) ;; esac; shift; done
     [ $m = 1 ] || { echo "fake pass: only -m is supported" >&2; exit 2; }
-    mkdir -p "$(dirname "$D/$1")"; cat > "$D/$1" ;;
+    mkdir -p "$(dirname "$D/$1")" "$(dirname "$G/$1")"; cat > "$D/$1" && printf 'FAKEGPG\n' > "$G/$1.gpg" ;;
   show) [ -f "$D/$2" ] || { echo "Error: $2 is not in the password store." >&2; exit 1; }; cat "$D/$2" ;;
-  rm) shift; [ "$1" = -f ] && shift; [ -f "$D/$1" ] || exit 1; rm -f "$D/$1" ;;
+  rm) shift; [ "$1" = -f ] && shift; [ -f "$D/$1" ] || exit 1; rm -f "$D/$1" "$G/$1.gpg" ;;
   *) echo "fake pass: unsupported $*" >&2; exit 2 ;;
 esac

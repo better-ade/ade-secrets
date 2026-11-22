@@ -323,7 +323,9 @@ the design changed (not worked around) where one does not hold.
 - **C8, process environments:** whether another process of the same user can read a process's environment
   (Linux `/proc/<pid>/environ`; macOS `ps -E` or `ps eww`), for the residual risk wording. (S4)
 - **C9, Keychain attributes:** `security find-generic-password -s ade-secrets -a <name>` without `-w` raises no
-  dialog on a `-T ""` item. (S3)
+  dialog on a `-T ""` item. (S3) Not confirmed by the S3 builder (2026-11-22): builders run fakes only and never
+  touch a real keychain; `has` is built as written above (meta, then the attributes) and step 6 of the owner check
+  below confirms it.
 - **C10, the shared release workflow:** that `assets` takes repository paths separated by spaces, names each asset
   by its base name, and writes the name and sha256 into `release.json` in the form ade-cli's `manifest_py` reads. (S5)
 
@@ -335,3 +337,6 @@ shell: `ade-secrets has owner.check` exits 0 with no dialog; `ade-secrets run ow
 refused. (3) `ade-secrets set owner.run --run /usr/bin/wc --stdin` (type `throwaway-5`), then
 `ade-secrets run owner.run -- wc -c </dev/null` prints `12` (the value, its newline, no more) and `ade-secrets run owner.run --
 /bin/cat` is refused. (4) A LaunchAgent that runs step 3's `wc` writes `12` to a file with no dialog. (5) Forget both.
+(6, C9) `ade-secrets set owner.closed --plain` (type `throwaway-6`), then `ade-secrets has owner.closed; echo $?` and
+`security find-generic-password -s ade-secrets -a owner.closed >/dev/null; echo $?`: each prints `0` and no dialog
+shows (a dialog here means `has` must change). Then `ade-secrets forget owner.closed`.
