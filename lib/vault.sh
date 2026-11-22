@@ -5,9 +5,11 @@
 # confirmed each time, cleared after 10 s). For the age store the vault keeps the identity in its own memory once
 # unlocked (u), hands it to age on a pipe, and forgets it on l or after IDLE seconds without a key (at most 300).
 
+# Text from meta or the environment reaches bash arithmetic only as ^[1-9][0-9]{0,11}$: anything else there is code
+# (a subscript such as N_[$(cmd)] runs cmd) or an octal number (08 is an error, 010 is 8).
+is_num() { [[ "$1" =~ ^[1-9][0-9]{0,11}$ ]]; }
 ROTATE_DAYS="${ADE_SECRETS_ROTATE_DAYS:-90}"
-case "$ROTATE_DAYS" in ''|*[!0-9]*) ROTATE_DAYS=90 ;; esac
-{ [ "$ROTATE_DAYS" -ge 1 ] && [ "$ROTATE_DAYS" -le 3650 ]; } || ROTATE_DAYS=90
+is_num "$ROTATE_DAYS" && [ "$ROTATE_DAYS" -le 3650 ] || ROTATE_DAYS=90
 REVEAL="${ADE_SECRETS_REVEAL:-off}"
 REVEAL_SECONDS=10
 IDLE="${ADE_SECRETS_IDLE:-300}"
@@ -30,6 +32,9 @@ v_load() {
   [ -f "$META" ] || return 0
   while IFS="$(printf '\t')" read -r n s k u c r h; do
     [ -n "$n" ] || continue
+    # a name is a file name under notes/ and tests/: a line whose name breaks the name rule is not loaded
+    [[ "$n" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || continue
+    is_num "$r" || r=0
     [ $((now - r)) -ge "$limit" ] && OVERDUE="$OVERDUE $n"
     if [ -n "$f" ]; then
       hay="$(printf '%s %s %s' "$n" "$k" "$u" | tr 'A-Z' 'a-z')"
