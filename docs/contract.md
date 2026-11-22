@@ -95,7 +95,21 @@ entries. What keeps every other key out is item 4, the allow-list. `get` refuses
 
 Every other command refuses when any of those variables (including `CLAUDE_CODE_ENTRYPOINT`) is set, when a claude
 process is anywhere among its ancestors, or when stdin is not a terminal. The guards read the process table with
-`/bin/ps` by path, and the script runs as `bash -p` (no exported functions, `BASH_ENV` or `SHELLOPTS` from the caller).
+`/bin/ps` by path.
+
+### Start-up
+
+Every command, `get` included, first reads its own environment (`/usr/bin/env`, by path) and refuses (exit 3, one
+line naming the variables, before any value is read) when it carries an exported function (`BASH_FUNC_*`),
+`BASH_ENV`, `ENV`, `SHELLOPTS` or `BASHOPTS`. `bash -p` (the shebang) does not import them, but it does pass them on
+to its children (`pass` is a bash script), and `bash ade-secrets` with `SHELLOPTS=privileged` turns `-p` on only after
+bash has imported the functions; so nothing the caller can set decides this. Until the check is done the script runs
+only keywords, expansions and special builtins, in posix mode (a `POSIXLY_CORRECT` assignment), where `exec`, `exit`,
+`set` and `unset` are found before any function. Then, when not started through the shebang, it starts again once as
+`/bin/bash -p` (it cannot loop: `-p` is then on). Refusing was chosen over re-running through `env -i` with an
+allow-list: it cannot loop, behaves the same on bash 3.2 and 5, and needs no list of variables to carry (an allow-list
+that missed a Claude Code session marker would weaken the agent guard). The cost: a profile that exports a function
+or sets `BASH_ENV` must run it without them, for example `env -u BASH_ENV ade-secrets list`.
 
 ## Reads outside the tool
 
@@ -104,7 +118,10 @@ The checks above only cover `ade-secrets` itself. Each store also limits a direc
 - **Keychain.** An entry not set `--helper` is created with an empty trusted-application list (`-T ""`), so macOS
   asks the user, in its own dialog, on every read of its value, by `ade-secrets copy` or by anyone running `security`.
   A helper entry trusts `/usr/bin/security`, so the key helper reads it without a dialog. Changing an entry's helper
-  flag deletes and re-adds its item (a trusted list is set when an item is created). Because `security -i` hides a
+  flag re-creates its item (a trusted list is set only when an item is created, and an account holds one item): the
+  old value is read into the process's memory first (a closed item asks in the dialog; Deny changes nothing), the old
+  item is deleted, the new one added, and if that add fails the old value is put back with its old trusted list
+  (`set` exits 1, "kept its old value"). Only if that too fails is the entry gone, and `set` says so. Because `security -i` hides a
   failed command and reading the value back would ask again, a write is checked through the item's `mdat` timestamp
   (a write in the same second waits for the next one). Observed on a throwaway keychain by the S1 builder: an update
   of a `-T ""` item raises the allow dialog too; Deny there is reported as a failed `set`.
@@ -128,6 +145,22 @@ pattern matches on the plain command: they stop accidents, not an agent that wri
 
 Every route that remains, plainly. ade-secrets runs as the user, like the agent; nothing here is a sandbox.
 
+- **The helper allow-list is a file the user can write.** Which entries `get` serves is the helper field in
+  `~/.ade-secrets/meta`, a plain text file. Anything that runs as the user (an agent's command included) can edit it
+  and mark any entry as a helper entry; `get` then serves it without the allow dialog of `ade-secrets` itself. What
+  still stands in the way depends on the store: a Keychain item created closed (`-T ""`) still raises the macOS
+  dialog on that read (the flag in `meta` does not change the item's trusted list); a pass entry is decrypted with no
+  prompt while gpg-agent holds the passphrase; the age store cannot serve `get` at all. Neither the
+  agent guard nor the store folder's mode 700 protects against this: both stop other users, not the user's own
+  processes. ade-secrets refuses a `meta` that is a symlink, not owned by the user, or group- or world-writable, which
+  stops another account from changing it, not the user's own processes. Check `ade-secrets list` (the HELPER column)
+  now and then; the `Read(~/.ade-secrets/**)` deny rule stops only the Read tool, not a shell.
+- **Started not through its shebang, a `BASH_ENV` file runs first.** `bash ade-secrets ...` (or `bash -c`, or sourcing
+  the script) runs the file `BASH_ENV` names inside the process before line 1. That file can unset `BASH_ENV`, define
+  functions that are not exported, or set a `DEBUG` trap (with `extdebug`, it can skip any command, the start-up
+  check included). The check refuses whenever `BASH_ENV` (or an exported function) is still in the environment; a file
+  that removes its own traces cannot be detected from bash. Run `ade-secrets` through its shebang (on `PATH`, or
+  `./bin/ade-secrets`): `bash -p` never reads `BASH_ENV`.
 - **Same user, no boundary.** An agent can unset the variables, rebuild the process tree (`exec /bin/sh -c ...`, a
   double fork) or allocate a pseudo-terminal, and pass every check. The checks stop use by accident or by instruction.
 - **Helper entries** are readable by Claude Code and anything it runs, without a dialog. Mark `--helper` only the keys
@@ -176,7 +209,10 @@ throwaway value (not a real key), and answer each dialog yourself.
    `security find-generic-password -s ade-secrets -a owner-check-helper -w`: it prints `throwaway-3` with no dialog.
 5. `security find-generic-password -s ade-secrets -a owner-check-helper | grep mdat`: one line of the form
    `"mdat"<timedate>=0x... "YYYYMMDDhhmmssZ\000"` (the format the write check reads).
-6. `ade-secrets set owner-check-closed --helper` (type `throwaway-4`): the item is deleted and re-added (note whether
-   the delete shows a dialog); then step 4's `security` command for `owner-check-closed` prints with no dialog.
+6. `ade-secrets set owner-check-closed --helper` (type `throwaway-4`): first the allow dialog for reading the old
+   value shows (ade-secrets keeps it in memory to put back if the re-add fails); press **Deny**: `set` exits 1 and
+   `security find-generic-password -s ade-secrets -a owner-check-closed -w` still asks (the item is unchanged). Run
+   the `set` again and press **Allow**: the item is deleted and re-added (note whether the delete shows a dialog);
+   then step 4's `security` command for `owner-check-closed` prints `throwaway-4` with no dialog.
 7. `ade-secrets forget owner-check-closed` and `ade-secrets forget owner-check-helper`: both are gone
    (`security find-generic-password -s ade-secrets -a owner-check-helper` exits 44). Note any dialog.

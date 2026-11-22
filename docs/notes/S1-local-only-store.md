@@ -8,7 +8,8 @@ Story: `docs/stories/S1-local-only-store.md`. Risk: high (secrets).
   `store` (the recorded backend), `meta` (TSV: name, store, kind, used-by, created, rotated, helper; never a value),
   and for age `age/identity.age` and `age/entries/<name>.age` (no recipient file, no session).
 - Backends: `keychain` (`security -i` with the command on stdin; entries not set `--helper` are created with `-T ""`,
-  helper entries with `-T /usr/bin/security`; a changed helper flag deletes and re-adds the item; a write is checked
+  helper entries with `-T /usr/bin/security`; a changed helper flag re-creates the item, keeping the old value in
+  memory and putting it back if the add fails; a write is checked
   by the item's `mdat`, since `-i` hides failures and a read-back would raise the dialog), `pass` (`insert -m` on
   stdin), `age` (a generated identity encrypted with the passphrase; `set` and `copy` decrypt it into a shell variable
   and pass it to age on a pipe; the recipient comes from `age-keygen -y`; `unlock` only creates the store). Values
@@ -34,6 +35,11 @@ Story: `docs/stories/S1-local-only-store.md`. Risk: high (secrets).
   Code and anything it runs (docs/contract.md). Names are not lower-cased (hubs use mixed case); a name equal to an
   existing one ignoring case is refused instead. Started as `bash ade-secrets`, the script re-executes itself as
   `/bin/bash -p`.
+- Sign-off fix round (2026-11-22): the start-up check refuses an exported function, `BASH_ENV`, `ENV`, `SHELLOPTS` or
+  `BASHOPTS` in the environment, read with `/usr/bin/env` (not `$-`, which `SHELLOPTS=privileged` sets after the
+  functions are imported); refusal over an `env -i` re-exec (no allow-list, no loop). `meta` (the helper allow-list)
+  is refused when a symlink, not the user's, or group- or world-writable. Keychain re-create keeps the old value in
+  memory and puts it back if the add fails (`FAKE_FAIL_ADD=once` in the fake `security`).
 
 ## Tests
 - `tests/pty_run.py` runs each command detached (its parent re-parented to init), in a pty or with no terminal, so
