@@ -1,7 +1,7 @@
 #!/bin/bash
 # Review fixes: the store folders are private (refused when a symlink, not the user's, or not mode 700); names that
 # differ only in case are refused (pass and age keep a file per name, and macOS paths ignore case); the script runs
-# as `bash -p` with its options reset, so an exported function, BASH_ENV or SHELLOPTS cannot reach a value, and the
+# as `bash -p` and refuses an exported function, BASH_ENV or SHELLOPTS in the environment (test_startup.sh), and the
 # guards call /bin/ps by path.
 . "$(dirname "$0")/lib.sh"
 
@@ -50,23 +50,46 @@ EXTRA_ENV=("BASH_FUNC_printf%%=() { builtin printf '%s' \"\$*\" >> $T/leak.func;
 t_notty -- /bin/bash -c 'printf "%s" fixture-value-p-0 >/dev/null'
 check "-p: the hostile environment does reach a plain /bin/bash (so the checks below can fail)" eval 'grep -q -F fixture-value-p-0 "$T/leak.bashenv"'
 rm -f "$T/leak.func" "$T/leak.bashenv"
+EXTRA_ENV=()
 t_set alpha 'fixture-value-p-1'
-check "-p: set works with a hostile environment" [ "$RC" = 0 ]
+check "-p: set works in a clean environment" [ "$RC" = 0 ]
+EXTRA_ENV=("BASH_FUNC_printf%%=() { builtin printf '%s' \"\$*\" >> $T/leak.func; builtin printf \"\$@\"; }" "BASH_ENV=$T/input/bashenv" SHELLOPTS=xtrace:allexport)
+t_set alpha 'fixture-value-p-2'
+check "-p: set refuses a hostile environment (exit 3), nothing stored" eval '[ "$RC" = 3 ] && has "$OUT" BASH_ENV && hasnt "$OUT" "value for"'
 t_copy alpha --for 30
-check "-p: copy works with a hostile environment" [ "$RC" = 0 -a "$(clip)" = fixture-value-p-1 ]
-# (the bash fakes on PATH do import the function and run BASH_ENV; what matters is that ade-secrets does not, so the
-# checks look for the value, which only ade-secrets' own printf ever handles)
-check "-p: an exported printf function is not imported" eval '! grep -q -F fixture-value-p-1 "$T/leak.func" 2>/dev/null'
-check "-p: BASH_ENV is not run" eval '! grep -q -F fixture-value-p-1 "$T/leak.bashenv" 2>/dev/null'
+check "-p: copy refuses a hostile environment" eval '[ "$RC" = 3 ] && [ -z "$(clip)" ]'
+check "-p: an exported printf function never sees a value" eval '! grep -q -F fixture-value-p- "$T/leak.func" 2>/dev/null'
+check "-p: BASH_ENV never sees a value" eval '! grep -q -F fixture-value-p- "$T/leak.bashenv" 2>/dev/null'
 check "-p: SHELLOPTS=xtrace traces nothing (no value on screen)" eval 'hasnt "$OUT" "+ " && no_leak fixture-value-p-1'
-check "-p: SHELLOPTS=allexport exports no value to the tools" eval '! grep -q -F fixture-value-p-1 "$T/state/calls.log"'
+check "-p: SHELLOPTS=allexport exports no value to the tools" eval '! grep -q -F fixture-value-p- "$T/state/calls.log"'
 rm -f "$T/leak.func" "$T/leak.bashenv"; clip_put ''
 t_tty -- /bin/bash "$BIN" copy alpha --for 30
-check "-p: started as 'bash ade-secrets', it starts again as bash -p" eval '[ "$RC" = 0 ] && [ "$(clip)" = fixture-value-p-1 ] && no_leak fixture-value-p-1'
+check "-p: started as 'bash ade-secrets' with a hostile environment, it refuses" eval '[ "$RC" = 3 ] && [ -z "$(clip)" ] && no_leak fixture-value-p-1'
 EXTRA_ENV=("BASH_FUNC_ps%%=() { echo 1; }")
 t_tty -- @claude @ list
 check "a function named ps cannot hide a claude ancestor" [ "$RC" = 3 ]
 EXTRA_ENV=()
 check "the guards call ps by absolute path" eval 'grep -q "/bin/ps -o" "$BIN" && ! grep -E -q "(^|[^/])\\bps -o" "$BIN"'
 check "the shebang is bash -p" [ "$(head -1 "$BIN")" = "#!/bin/bash -p" ]
+# ---- the helper allow-list lives in meta: refused when it is not the user's own private file (docs/contract.md)
+t_setup; STORE_KIND=keychain CLIP_KIND=xclip
+t_set apikey 'fixture-value-meta-1' --helper
+helper_get() { t_notty -- @claude /bin/sh -c "\"$BIN\" get apikey"; }
+helper_get
+check "meta: a private meta serves the helper entry" [ "$RC" = 0 -a "$OUT" = fixture-value-meta-1 ]
+for m in 620 602 660 666; do
+  chmod $m "$STORE/meta"
+  helper_get
+  check "meta: mode $m (group- or world-writable) is refused by get" eval '[ "$RC" = 1 ] && [ -z "$OUT" ] && has "$ERR" meta'
+  t_tty -- @ list
+  check "meta: mode $m is refused by list too" eval '[ "$RC" = 1 ] && has "$OUT" meta'
+done
+chmod 600 "$STORE/meta"; cp "$STORE/meta" "$T/meta.real"; rm "$STORE/meta"; ln -s "$T/meta.real" "$STORE/meta"
+helper_get
+check "meta: a symlinked meta is refused" eval '[ "$RC" = 1 ] && [ -z "$OUT" ] && has "$ERR" symlink'
+rm "$STORE/meta"; mv "$T/meta.real" "$STORE/meta"
+helper_get
+check "meta: restored to a private file, it serves again" [ "$RC" = 0 -a "$OUT" = fixture-value-meta-1 ]
+# (a meta owned by another user cannot be made without root; the check is `[ -O meta ]`)
+t_cleanup
 t_done

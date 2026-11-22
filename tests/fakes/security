@@ -2,7 +2,9 @@
 """Fake macOS `security`: generic passwords in $FAKE_STATE/keychain/<service>/<account> (value) and <account>.acl
 (the trusted-application list: "closed" for -T "", "security" for -T /usr/bin/security or no -T). Reading or
 updating a closed item stands for the macOS allow dialog: it is logged as DIALOG, and FAKE_DENY=1 is the user
-pressing Deny. `-i` reads commands on stdin and, like the real tool, hides a failed command's status and message."""
+pressing Deny. FAKE_FAIL_ADD=once makes the first add-generic-password of a test fail (a full or locked keychain), so
+a test can see what a failed add leaves behind. `-i` reads commands on stdin and, like the real tool, hides a failed
+command's status and message."""
 import os, shlex, sys, time
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import _fake
@@ -38,6 +40,9 @@ def run(args):
     acl = f + ".acl"
     closed = os.path.exists(acl) and open(acl).read() == "closed"
     if cmd == "add-generic-password":
+        if os.environ.get("FAKE_FAIL_ADD") == "once" and not os.path.exists(_fake.path("add-failed")):
+            open(_fake.path("add-failed"), "w").write("")
+            return 1
         if os.path.exists(f):
             if "-U" not in o:
                 return 45
