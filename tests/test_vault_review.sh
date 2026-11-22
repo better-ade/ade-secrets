@@ -27,6 +27,11 @@ done
 t_tty "expect q quit" "send q" -- @ vault
 check "the vault creates its folders private" eval '[ "$RC" = 0 ] && [ "$(ls -ld "$STORE/notes/keychain" | cut -c1-10)" = drwx------ ] && [ "$(ls -ld "$STORE/tests" | cut -c1-10)" = drwx------ ]'
 
+# ---- add refuses a name that differs from an existing entry only in case (pass and age keep a file per name, and
+# macOS paths ignore case: without the check, adding Alpha would replace alpha's value there)
+t_tty "expect q quit" "send a" "expect name: " "send Alpha\n" "expect only in case" "send q" -- @ vault
+check "add: a name equal to an existing one ignoring case is refused before any prompt, alpha intact" eval '[ "$RC" = 0 ] && has "$OUT" "Alpha differs from the entry alpha only in case" && hasnt "$OUT" "kind [" && ! grep -q "^Alpha	" "$STORE/meta" && [ "$(kc alpha)" = "$V1" ]'
+
 # ---- the clipboard is cleared on every exit path of add and rotate
 printf 'fixture-multi-line-5\nsecond' > "$T/state/clipboard"
 t_tty "expect q quit" "send a" "expect name: " "send beta\n" "expect kind" "send \n" "expect used by" "send \n" \

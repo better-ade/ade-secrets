@@ -37,3 +37,5 @@ Story: `docs/stories/S2-terminal-vault.md`. Risk: high (secrets). Depends on S1.
   raw output stream is scanned, and "gone after 10 s" is the screen after the last clear. The story now says so.
 - Tests for ^Z run the vault in its own foreground process group (`pty_run.py --own-pgrp`): by default the harness's
   group is orphaned and the system discards terminal stop signals, so a ^Z test there could not fail.
+- Sign-off fix round (2026-11-22): `tests/test_vault_review.sh` asserts that vault add refuses a name equal to an
+  existing one ignoring case before any further prompt; it fails when the `same_but_case` check in `va_add` is removed.
