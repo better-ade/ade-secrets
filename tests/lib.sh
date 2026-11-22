@@ -51,13 +51,14 @@ EOF
 }
 
 # t_tty [step...] -- <command words>: run in a pty, like a user's own terminal. Steps: "expect RE", "send TEXT",
-# "sleep S". Sets RC and OUT (the whole screen stream, carriage returns removed). A command word "@" stands for
+# "sleep S", "snap FILE", "run CMD" (tests/pty_run.py); OWN_PGRP=1 gives it its own process group, so ^Z really stops
+# it. Sets RC and OUT (the whole screen stream, carriage returns removed). A command word "@" stands for
 # ade-secrets, "@claude" for the fake claude.
 t_tty() {
   T_N=$((T_N + 1)); local steps="$T/input/steps.$T_N" out="$T/run/out.$T_N"; : > "$steps"
   while [ $# -gt 0 ] && [ "$1" != -- ]; do printf '%s\n' "$1" >> "$steps"; shift; done
   shift; _t_cmd; _t_words "$@"
-  python3 "$TESTS_DIR/pty_run.py" --steps "$steps" --out "$out" --timeout "${T_TIMEOUT:-30}" -- "${CMD[@]}" 2>"$out.harness"
+  python3 "$TESTS_DIR/pty_run.py" ${OWN_PGRP:+--own-pgrp} --steps "$steps" --out "$out" --timeout "${T_TIMEOUT:-30}" -- "${CMD[@]}" 2>"$out.harness"
   RC=$?; OUT="$(tr -d '\r' < "$out" 2>/dev/null)"
 }
 
@@ -88,6 +89,13 @@ t_unlock() {
   local p="${1:-$AGE_PW}"
   if [ -f "$STORE/age/identity.age" ]; then t_tty "expect Enter passphrase" "sleep 0.1" "send $p\n" -- @ unlock
   else t_tty "expect Enter passphrase" "sleep 0.1" "send $p\n" "expect Confirm" "sleep 0.1" "send $p\n" -- @ unlock; fi
+}
+# screen_of <file>: what a terminal shows at the end of that output: the text after the last clear-screen, escapes removed
+screen_of() {
+  python3 -c 'import re, sys
+d = open(sys.argv[1], "rb").read().split(b"\x1b[2J")[-1]
+d = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]|\r", b"", d)
+sys.stdout.write(d.decode("utf-8", "replace"))' "$1"
 }
 clip() { cat "$T/state/clipboard" 2>/dev/null; }
 clip_put() { printf '%s' "$1" > "$T/state/clipboard"; }

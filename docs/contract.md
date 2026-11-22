@@ -56,6 +56,16 @@ The hub's apiKeyHelper line stays as it is (`... /path/to/hub/bin/secret <name>`
 execs `ade-secrets get <name>`, and the value reaches Claude Code on stdout. Moving a key from the hub's own Keychain
 service is a re-entry in the user's terminal (`bin/keys set <tool>`); nothing is copied across automatically.
 
+## The vault
+
+`ade-secrets vault` is the terminal interface (ade-cli's `ade vault` opens it in the user's own terminal). It is guarded
+like every command but `get`: inside an agent context it exits 3 before drawing anything. Settings, all optional:
+`ADE_SECRETS_ROTATE_DAYS` (reminder age, default 90), `ADE_SECRETS_REVEAL=on` (allows the confirmed 10 s reveal; off
+by default) and `ADE_SECRETS_IDLE` (seconds without a key before an unlocked age vault forgets its identity; default and
+cap 300). A live test for rotation is a command that gets the candidate value on stdin and exits 0 when it works; the
+vault shows it and asks y/N before each run. The vault's folders (`notes/`, `tests/` and one per store) must be real
+folders, the user's own, mode 700, or the vault does not open.
+
 ## The key helper: what it can and cannot tell apart
 
 Claude Code's docs (code.claude.com, settings reference, `apiKeyHelper`; checked 2026-11-21) say the helper is "a shell
@@ -169,7 +179,13 @@ Every route that remains, plainly. ade-secrets runs as the user, like the agent;
   that honour them. With `set --clipboard`, the key sits there until ade-secrets clears it (on every exit path).
 - **Permission rules** match the plain commands only: `sh -c`, a script file, `python3 -c` with `subprocess`, or
   `cat` instead of the Read tool pass them. Use Claude Code's sandbox where it is available.
-- **Memory:** a value lives in the ade-secrets process (a shell variable) for the length of one command; a debugger
+- **The vault's live test** is a command in `~/.ade-secrets/tests/<store>/<name>` that gets the new value on stdin.
+  Anything running as the user can change that file; the vault shows the command and asks before each run, so read
+  it. Notes there are plain text, never a secret.
+- **The vault's reveal** puts one value on the screen for up to 10 s (off unless `ADE_SECRETS_REVEAL=on`, confirmed
+  each time): a screen recorder, a terminal's own logging or someone looking can see it.
+- **Memory:** a value lives in the ade-secrets process (a shell variable) for the length of one command, and an
+  unlocked age vault holds the identity until `l`, quit or the idle lock; a debugger
   running as the user, where the system allows one to attach, can read it.
 - **Fail closed has a cost:** a claude started from an IDE terminal (which sets `CLAUDECODE`) or from inside another
   Claude Code session inherits the markers, so its key helper is refused. Start it from a plain terminal.
