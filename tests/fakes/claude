@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake claude: runs its arguments as a child, so a test can put a claude process among the ancestors.
+"$@"
+exit $?

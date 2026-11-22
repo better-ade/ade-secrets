@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Fake age. Encryption reverses and base64-encodes the plaintext, so a value is never stored readable. Recipient files
+need -d -i <identity holding FAKE-AGE-IDENTITY-FOR-TESTS>; passphrase files (-p) ask on /dev/tty, like the real tool."""
+import base64, getpass, hashlib, os, sys
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _fake
+_fake.log("age")
+
+args, o, i = sys.argv[1:], {}, 0
+while i < len(args):
+    a = args[i]
+    if a in ("-r", "-i", "-o"):
+        o[a] = args[i + 1]; i += 2
+    elif a in ("-d", "-p", "-a", "--decrypt", "--passphrase", "--armor"):
+        o[a.lstrip("-")[0]] = True; i += 1
+    else:
+        o["in"] = a; i += 1
+
+
+def tty_pass(prompt):
+    return getpass.getpass(prompt)  # reads /dev/tty with echo off; fails without a terminal
+
+
+def out(data):
+    if "-o" in o:
+        open(o["-o"], "wb").write(data)
+    else:
+        sys.stdout.buffer.write(data)
+
+
+data = open(o["in"], "rb").read() if "in" in o else sys.stdin.buffer.read()
+enc = lambda b: base64.b64encode(b[::-1])
+dec = lambda b: base64.b64decode(b)[::-1]
+if o.get("d"):
+    head, _, body = data.partition(b"\n")
+    if head == b"FAKEAGE recipient":
+        ident = open(o["-i"], "rb").read() if "-i" in o else b""
+        if b"FAKE-AGE-IDENTITY-FOR-TESTS" not in ident:
+            sys.exit("age: error: no identity matched any of the recipients")
+        out(dec(body))
+    elif head.startswith(b"FAKEAGE passphrase "):
+        try:
+            p = tty_pass("Enter passphrase: ")
+        except Exception:
+            sys.exit("age: error: could not read passphrase")
+        if hashlib.sha256(p.encode()).hexdigest().encode() != head.split(b" ")[2]:
+            sys.exit("age: error: incorrect passphrase")
+        out(dec(body))
+    else:
+        sys.exit("age: error: not an age file")
+elif o.get("p"):
+    try:
+        p = tty_pass("Enter passphrase (leave empty to autogenerate a secure one): ")
+        c = tty_pass("Confirm passphrase: ")
+    except Exception:
+        sys.exit("age: error: could not read passphrase")
+    if p != c or not p:
+        sys.exit("age: error: passphrases didn't match")
+    out(b"FAKEAGE passphrase " + hashlib.sha256(p.encode()).hexdigest().encode() + b"\n" + enc(data))
+elif "-r" in o:
+    out(b"FAKEAGE recipient\n" + enc(data))
+else:
+    sys.exit("age: error: missing recipients")

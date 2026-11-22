@@ -4,5 +4,7 @@ on:
   push: { branches: [main] }
 jobs:
   ci:
+    # the story's verification command on macOS (bash 3.2) and Linux (bash 5)
+    strategy: { fail-fast: false, matrix: { os: [ubuntu-latest, macos-latest] } }
     uses: better-ade/.github/.github/workflows/verify.yml@v1
-    with: { command: "bash tests/run.sh" }
+    with: { command: "bash tests/run.sh", runs-on: "${{ matrix.os }}" }

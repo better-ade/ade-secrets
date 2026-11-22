@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake wl-paste.
+{ printf 'CALL wl-paste argv=%s\n' "$*"; env | sed 's/^/  env /'; } >> "$FAKE_LOG"
+[ -f "$FAKE_STATE/clipboard" ] && cat "$FAKE_STATE/clipboard"; exit 0

@@ -1,0 +1,4 @@
+#!/bin/bash
+# Fake pbpaste: the fake clipboard on stdout.
+{ printf 'CALL pbpaste argv=%s\n' "$*"; env | sed 's/^/  env /'; } >> "$FAKE_LOG"
+[ -f "$FAKE_STATE/clipboard" ] && cat "$FAKE_STATE/clipboard"; exit 0

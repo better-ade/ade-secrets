@@ -1,0 +1,12 @@
+#!/bin/bash
+# Fake `pass`: entries in $FAKE_STATE/pass/<path>; insert reads the value on stdin.
+{ printf 'CALL pass argv=%s\n' "$*"; env | sed 's/^/  env /'; } >> "$FAKE_LOG"
+D="$FAKE_STATE/pass"
+case "${1:-}" in
+  insert) shift; m=0; while [ $# -gt 1 ]; do case "$1" in -m|--multiline) m=1;; -f|--force) ;; esac; shift; done
+    [ $m = 1 ] || { echo "fake pass: only -m is supported" >&2; exit 2; }
+    mkdir -p "$(dirname "$D/$1")"; cat > "$D/$1" ;;
+  show) [ -f "$D/$2" ] || { echo "Error: $2 is not in the password store." >&2; exit 1; }; cat "$D/$2" ;;
+  rm) shift; [ "$1" = -f ] && shift; [ -f "$D/$1" ] || exit 1; rm -f "$D/$1" ;;
+  *) echo "fake pass: unsupported $*" >&2; exit 2 ;;
+esac

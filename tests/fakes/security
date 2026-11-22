@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Fake macOS `security`: generic passwords in $FAKE_STATE/keychain/<service>/<account> (value) and <account>.acl
+(the trusted-application list: "closed" for -T "", "security" for -T /usr/bin/security or no -T). Reading or
+updating a closed item stands for the macOS allow dialog: it is logged as DIALOG, and FAKE_DENY=1 is the user
+pressing Deny. FAKE_FAIL_ADD=once makes the first add-generic-password of a test fail (a full or locked keychain), so
+a test can see what a failed add leaves behind. `-i` reads commands on stdin and, like the real tool, hides a failed
+command's status and message."""
+import os, shlex, sys, time
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import _fake
+
+_fake.log("security")
+
+
+def opts(args):
+    o, i = {}, 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-s", "-a", "-w", "-l", "-D", "-j", "-T"):
+            o[a] = args[i + 1] if i + 1 < len(args) else ""; i += 2
+        elif a.startswith("-"):
+            o[a] = True; i += 1
+        else:
+            o.setdefault("_", []).append(a); i += 1
+    return o
+
+
+def dialog(what, acct):
+    with open(os.environ["FAKE_LOG"], "a") as f:
+        f.write("DIALOG %s %s\n" % (what, acct))
+    return os.environ.get("FAKE_DENY") != "1"
+
+
+def run(args):
+    if not args:
+        return 2
+    cmd, o = args[0], opts(args[1:])
+    acct = o.get("-a", "")
+    f = _fake.path("keychain", o.get("-s", ""), acct)
+    acl = f + ".acl"
+    closed = os.path.exists(acl) and open(acl).read() == "closed"
+    if cmd == "add-generic-password":
+        if os.environ.get("FAKE_FAIL_ADD") == "once" and not os.path.exists(_fake.path("add-failed")):
+            open(_fake.path("add-failed"), "w").write("")
+            return 1
+        if os.path.exists(f):
+            if "-U" not in o:
+                return 45
+            if closed and not dialog("modify", acct):
+                return 51
+        else:
+            t = o.get("-T")
+            open(acl, "w").write("closed" if t == "" else "security")
+        open(f, "w").write(o.get("-w", ""))
+        return 0
+    if cmd == "find-generic-password":
+        if not os.path.exists(f):
+            sys.stderr.write("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n")
+            return 44
+        if "-w" in o:
+            if closed and not dialog("read", acct):
+                return 51
+            sys.stdout.write(open(f).read() + "\n")
+        else:
+            m = time.strftime("%Y%m%d%H%M%S", time.gmtime(os.stat(f).st_mtime))
+            sys.stdout.write('keychain: "fake"\nclass: "genp"\nattributes:\n    "mdat"<timedate>=0x00  "%sZ\\000"\n' % m)
+        return 0
+    if cmd == "delete-generic-password":
+        if not os.path.exists(f):
+            return 44
+        os.remove(f)
+        if os.path.exists(acl):
+            os.remove(acl)
+        return 0
+    return 2
+
+
+if sys.argv[1:2] == ["-i"]:
+    for line in sys.stdin.read().splitlines():
+        if line.strip():
+            run(shlex.split(line))
+    sys.exit(0)
+sys.exit(run(sys.argv[1:]))
